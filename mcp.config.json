@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "butlet": {
+      "command": "uv",
+      "args": [
+        "--diectory",
+        "H:/Butlet",
+        "run",
+        "server.py"
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+[project]
+name = "butlet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=2.1.1",
+    "numpy>=2.4.6",
+    "pandas>=3.0.5",
+    "pymongo>=4.17.0",
+    "python-dotenv>=1.2.3",
+    "qdrant-client>=1.19.0",
+]
