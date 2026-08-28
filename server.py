@@ -118,9 +118,9 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
 
         return json.dumps(res)
     except Exception as e:
-        with open("error.txt",'w') as f:
-            f.write(str(e))
-
+        return json.dumps({
+            "error":"Encountered an error "+e
+        })
 
 
 
@@ -143,7 +143,9 @@ def get_cart(user_id=None):
 
         return json.dumps(cart_info)
     except Exception as e:
-        print(e)
+        return json.dumps({
+            "error":"Encountered an error "+e
+        })
 
    
 @mcp.tool()
@@ -200,7 +202,9 @@ def add_item(user_id=None, product_name=None,quantity=1):
         return json.dumps({"updated_cart":str(cart_info)})
         
     except Exception as e:
-        print(e)
+        return json.dumps({
+            "error":"Encountered an error "+e
+        })
 
 
 
@@ -219,10 +223,6 @@ def generate_payment_link(user_id=None,email=None):
         "payment_url":link,
         "cart":cart_info
     })
-
-
-
-print(add_item("5505","Air Force 1"))
 
 
 if __name__=="__main__":
