@@ -14,7 +14,12 @@ import os
 from qdrant_client.models import Document
 from pymongo import MongoClient
 import shelve
+import razorpay
 load_dotenv()
+
+
+razor_api=os.getenv("RAZORPAY_API")
+razor_secret=os.getenv("RAZORPAY_SECRET")
 
 
 mongo_uri=os.getenv("MONGO_CONNECTION_URL")
@@ -22,6 +27,7 @@ mongo_uri=os.getenv("MONGO_CONNECTION_URL")
 client=MongoClient(mongo_uri)
 database=client['database']
 cart_connection=database['carts']
+razorpay_client=razorpay.Client(auth=(razor_api,razor_secret))
 
 shoe_catalog=pd.read_csv("shop-product-catalog.csv")
 
@@ -168,6 +174,7 @@ def add_item(user_id=None, product_name=None,quantity=1):
             return json.dumps({"error":"No item was found"})
 
         res=cart_connection.find_one({'user_id':str(user_id)},{'_id':0})
+        quantity=int(quantity)
         new_doc=False
         cart_info=res
         if res is None:
@@ -194,6 +201,29 @@ def add_item(user_id=None, product_name=None,quantity=1):
         
     except Exception as e:
         print(e)
+
+
+
+
+
+
+
+@mcp.tool()
+def generate_payment_link(user_id=None,email=None):
+    cart_info=cart_connection.find_one({"user_id":str(user_id)},{"_id":0})
+    amount=cart_info['Amount']
+
+    link="www.pay_url.com/"+user_id
+
+    return json.dumps({
+        "payment_url":link,
+        "cart":cart_info
+    })
+
+
+
+print(add_item("5505","Air Force 1"))
+
 
 if __name__=="__main__":
     mcp.run(transport="stdio")
