@@ -1,5 +1,7 @@
 from typing import Any
+import datetime
 import os
+import jwt
 import httpx2
 import logging
 from mcp.server import MCPServer
@@ -21,12 +23,16 @@ load_dotenv()
 razor_api=os.getenv("RAZORPAY_API")
 razor_secret=os.getenv("RAZORPAY_SECRET")
 
+jwt_secret=os.getenv("JWT_SECRET")
+jwt_algorithm=os.getenv("JWT_ALGORITHM")
+
 
 mongo_uri=os.getenv("MONGO_CONNECTION_URL")
 
 client=MongoClient(mongo_uri)
 database=client['database']
 cart_connection=database['carts']
+user_connection=database['users']
 razorpay_client=razorpay.Client(auth=(razor_api,razor_secret))
 
 shoe_catalog=pd.read_csv("shop-product-catalog.csv")
@@ -34,6 +40,28 @@ shoe_catalog=pd.read_csv("shop-product-catalog.csv")
 mcp=MCPServer("butlet")
 
 
+
+
+def verify(token=None):
+    if token is None:
+        return False
+    try:
+        user_info=jwt.decode(token,jwt_secret,jwt_algorithm)
+        exp_time=user_info['exp']
+        curr_time=int(datetime.datetime.now().timestamp())
+        if exp_time-curr_time<0:
+            return False
+        email=user_info['email']
+        res=user_connection.find_one({'email':email})
+        if res is None:
+            return False
+        return True
+
+    except Exception as e:
+        print(e)
+        return False
+    
+    
 
 
 
@@ -55,7 +83,6 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
     shoe_color: Optional This can be used to filter products based on a particular color, if nothing is passed all colors are considered
     
     """
-
     try:
 
         semantic_res=None
@@ -110,7 +137,7 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
         if semantic_res is not None:
             soft_matching=pd.DataFrame(columns=shoe_catalog.columns)
             for id in semantic_res.points:
-                if id.score<0.3:
+                if id.score<0.5:
                     continue
                 item=shoe_catalog[shoe_catalog['ProductID']==id.payload['P_id']]
                 soft_matching=pd.concat([soft_matching,item],ignore_index=True)
@@ -125,16 +152,20 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
 
 
 @mcp.tool()
-def get_cart(user_id=None):
+def get_cart(token=None):
     """
     This tool gets the current cart for the user containing information about the products, quantity and the total cart value
 
     params:
 
-    user_id: Mandatory user_id is required to the user specific cart
+    token: Mandatory token is used to  verify user to get the cart
     
     
     """
+    if not verify(token):
+        return {"error":"Invalid token"}
+    user_id=jwt.decode(token,jwt_secret,jwt_algorithm)['user_id']
+
     try:
         if user_id is None:
             return json.dumps({"error":"user_id is unavailable, cannot get cart info"})
@@ -149,7 +180,7 @@ def get_cart(user_id=None):
 
    
 @mcp.tool()
-def add_item(user_id=None, product_name=None,quantity=1):    
+def add_item(token=None, product_name=None,quantity=1):    
 
 
 
@@ -158,11 +189,16 @@ def add_item(user_id=None, product_name=None,quantity=1):
 
     params:
 
-    user_id: Mandatory user_id is required to access the user specific cart
+    token: Mandatory token is used to verify user to add items to the valid user
     product_name: Mandatory product name that is to be added to the cart
     quantity: Optional Number of items that are to be added to the cart
     
     """
+
+    if not verify(token):
+        return {"error":"Invalid token"}
+    user_id=str(jwt.decode(token,jwt_secret,jwt_algorithm)['_id'])
+
     try:
         if user_id is None:
             return json.dumps({"error":"invalid User ID"})
@@ -211,9 +247,48 @@ def add_item(user_id=None, product_name=None,quantity=1):
 
 
 
+@mcp.tool()
+def login(email=None,password=None):
+    if email is None:
+        return {"error":"No email was sent"}
+    if password is None:
+        return {"error":"No password was sent"}
+    user=user_connection.find_one({"email":email})
+
+    if user is None:
+        return {"error":"Invalid email no user account is associated with this email"}
+    if user['password']!=password:
+        return {"error":"Invalid password"}
+    user.pop('password')
+    user['_id']=str(user['_id'])
+    now=datetime.datetime.now()
+    expiry_time=int(now.timestamp()+(3600))
+    user['exp']=expiry_time
+    token=jwt.encode(dict(user),jwt_secret,jwt_algorithm)
+
+    return {"token":token}
+
+
+
+
+
+
+
 
 @mcp.tool()
-def generate_payment_link(user_id=None,email=None):
+def generate_payment_link(token):
+    """
+    Tool used to generate the final checkout link, other wise proceed with the payment  if the agent is authorized to make the payment via the wallet
+
+    params:
+    token:Mandatory token is used to verify user and generate valid links
+    
+    """
+
+    if not verify(token):
+        return {"error":"Invalid token"}
+    user_id=str(jwt.decode(token,jwt_secret,jwt_algorithm)['_id'])
+
     cart_info=cart_connection.find_one({"user_id":str(user_id)},{"_id":0})
     amount=cart_info['Amount']
 
@@ -221,7 +296,8 @@ def generate_payment_link(user_id=None,email=None):
 
     return json.dumps({
         "payment_url":link,
-        "cart":cart_info
+        "cart":cart_info,
+        "amount":amount
     })
 
 
