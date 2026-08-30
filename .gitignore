@@ -13,3 +13,5 @@ wheels/
 
 *.file
 test.py
+
+*.csv

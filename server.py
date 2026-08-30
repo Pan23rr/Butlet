@@ -2,8 +2,6 @@ from typing import Any
 import datetime
 import os
 import jwt
-import httpx2
-import logging
 from mcp.server import MCPServer
 import pandas as pd
 import numpy as np
@@ -18,6 +16,7 @@ from pymongo import MongoClient
 import shelve
 import razorpay
 load_dotenv()
+
 
 
 razor_api=os.getenv("RAZORPAY_API")
@@ -36,9 +35,46 @@ user_connection=database['users']
 razorpay_client=razorpay.Client(auth=(razor_api,razor_secret))
 
 shoe_catalog=pd.read_csv("shop-product-catalog.csv")
+rules = pd.read_pickle("rules.pkl")
+other_items=pd.read_csv("related_items.csv")
+
 
 mcp=MCPServer("butlet")
 
+
+
+
+def recommend_items(cart, rules, top_n=5):
+    cart = {str(x) for x in cart}
+    recommendations = []
+
+    for _, rule in rules.iterrows():
+        antecedent = {str(x) for x in rule["antecedents"]}
+        consequent = {str(x) for x in rule["consequents"]}
+
+        if antecedent.issubset(cart):
+            for item in consequent:
+                if item not in cart:
+                    recommendations.append({
+                        "productID": item,
+                        "confidence": rule["confidence"],
+                    })
+
+    if not recommendations:
+        return pd.DataFrame()
+
+    recommendations = pd.DataFrame(recommendations)
+
+    return (
+        recommendations
+        .sort_values(
+            ["confidence"],
+            ascending=False
+        )
+        .drop_duplicates("productID")
+        .head(top_n)
+        .reset_index(drop=True)
+    )
 
 
 
@@ -155,6 +191,7 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
 def get_cart(token=None):
     """
     This tool gets the current cart for the user containing information about the products, quantity and the total cart value
+    It also provides recommendations based on the items in the cart, items that people buy with the items
 
     params:
 
@@ -164,19 +201,29 @@ def get_cart(token=None):
     """
     if not verify(token):
         return {"error":"Invalid token"}
-    user_id=jwt.decode(token,jwt_secret,jwt_algorithm)['user_id']
+    user_id=jwt.decode(token,jwt_secret,jwt_algorithm)['_id']
 
-    try:
-        if user_id is None:
-            return json.dumps({"error":"user_id is unavailable, cannot get cart info"})
-
-        cart_info=cart_connection.find_one({'user_id':str(user_id)},{"_id":0})
-
+    if user_id is None:
+        return json.dumps({"error":"user_id is unavailable, cannot get cart info"})
+    cart_info=cart_connection.find_one({'user_id':str(user_id)},{"_id":0})
+    items=set()
+    print(cart_info)
+    for item in list(cart_info['Products'].keys()):
+        id=shoe_catalog[shoe_catalog['ProductName']==item]['ProductID'].iloc[0].item()
+        items.add(id)
+    recommendations=recommend_items(items,rules)
+    if recommendations.empty:
         return json.dumps(cart_info)
-    except Exception as e:
-        return json.dumps({
-            "error":"Encountered an error "+e
-        })
+    rec_items=[]
+    for ids in recommendations['productID']:
+        if int(ids)<1129:
+            indx=shoe_catalog[shoe_catalog['ProductID']==int(ids)]
+            rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})
+        else:
+            indx=other_items[other_items['ProductID']==int(ids)]
+            rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})
+    cart_info['People also buy']=rec_items
+    return json.dumps(cart_info)
 
    
 @mcp.tool()
@@ -245,7 +292,59 @@ def add_item(token=None, product_name=None,quantity=1):
 
 
 
+@mcp.tool()
+def remove_item(token=None, product_name=None,quantity=1):    
 
+
+
+    """
+    This tool can be used to remove an item to the cart
+
+    params:
+
+    token: Mandatory token is used to verify user to add items to the valid user
+    product_name: Mandatory product name that is to be removed from the cart
+    quantity: Optional Number of items that are to be removed from the cart
+    
+    """
+
+    if not verify(token):
+        return {"error":"Invalid token"}
+    user_id=str(jwt.decode(token,jwt_secret,jwt_algorithm)['_id'])
+
+    try:
+        if user_id is None:
+            return json.dumps({"error":"invalid User ID"})
+
+        if product_name is None:
+            return json.dumps({"error":"invalid product Name"})
+
+        if int(quantity)<0:
+            return json.dumps({"error":"Cannot remove negatie quantity"})
+        res=cart_connection.find_one({'user_id':str(user_id)},{'_id':0})
+        quantity=int(quantity)
+        cart_info=res
+        if res is None:
+            return {"error":"User does not have any cart"}
+        products=cart_info.get("Products")
+        if(products.get(product_name,None)) is None:
+            return {"error":"User's cart doesnt have the item in the cart"}
+        quan=products.get(product_name)['Quantity']
+        if(quan<=quantity):
+            amt=cart_info['Products'][product_name]['Quantity']
+            cart_info['Products'].pop(product_name)
+            cart_connection.replace_one({'user_id':str(user_id)},cart_info)
+            return {"updated_cart":cart_info,"note":"quantity to be removed is larger than or equal to the quantity in thhe cart removed the item completely"}
+        cart_info['Products'][product_name]['Quantity']-=quantity
+
+        cart_connection.replace_one({'user_id':str(user_id)},cart_info)
+
+        return json.dumps({"updated_cart":str(cart_info)})
+        
+    except Exception as e:
+        return json.dumps({
+            "error":"Encountered an error "+e
+        })
 
 @mcp.tool()
 def login(email=None,password=None):
@@ -300,6 +399,13 @@ def generate_payment_link(token):
         "amount":amount
     })
 
+
+token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2YTkzMThlNGQ3M2JmMDUzOWEyYjdiZmQiLCJlbWFpbCI6Imx2bEBnLmNvbSIsImV4cCI6MTc4ODEyMzU3MX0.0IsviajkOElvShsjDUWv0ldQfaY5csnDF5ua0Vu8HLA"
+
+#add_item(token,"Air Zoom Structure 2")
+
+
+print(get_cart(token))
 
 if __name__=="__main__":
     mcp.run(transport="stdio")

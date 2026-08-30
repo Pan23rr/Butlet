@@ -1,1 +1,0 @@
-SQLite objects created in a thread can only be used in that same thread. The object was created in thread id 30948 and this is thread id 32248.
