@@ -36,7 +36,6 @@ razorpay_client=razorpay.Client(auth=(razor_api,razor_secret))
 
 shoe_catalog=pd.read_csv("shop-product-catalog.csv")
 rules = pd.read_pickle("rules.pkl")
-other_items=pd.read_csv("related_items.csv")
 
 
 mcp=MCPServer("butlet")
@@ -119,71 +118,61 @@ def get_product(product_name=None,product_brand=None,starting_price=0,ending_pri
     shoe_color: Optional This can be used to filter products based on a particular color, if nothing is passed all colors are considered
     
     """
-    try:
-
-        semantic_res=None
-        if shoe_description:
-            client=QdrantClient(
-                url=os.getenv("QDRANT_URL"),
-                api_key=os.getenv("QDRANT_API"),
-                cloud_inference=True
-            )
-
-            if product_brand is not None:
-                shoe_description+=f'Brand: {product_brand}'
-            if shoe_color is not None:
-                shoe_description+=f'Color {shoe_color}'
-            semantic_res=client.query_points(
-                collection_name="catalog",
-                query=Document(text=shoe_description,model="sentence-transformers/all-MiniLM-L6-v2"),
-                with_payload=True,
-                limit=30
-            )
-
-        hard_matching=None
-        if product_name is not None:
-            hard_matching=shoe_catalog[shoe_catalog['ProductName'].str.lower()==product_name.lower()]
-
+    semantic_res=None
+    if shoe_description:
+        client=QdrantClient(
+            url=os.getenv("QDRANT_URL"),
+            api_key=os.getenv("QDRANT_API"),
+            cloud_inference=True
+        )
         if product_brand is not None:
-            hard_matching=shoe_catalog[shoe_catalog['ProductBrand'].str.lower()==product_brand.lower()]
-        if int(starting_price) >0:
-            if hard_matching is not None:
-                hard_matching=hard_matching[hard_matching['Price']>=int(starting_price)]
-            else:
-                hard_matching=shoe_catalog[shoe_catalog['Price']>=int(starting_price)]
-        if int(ending_price) <19999:
-            if hard_matching is not None:
-                hard_matching=hard_matching[hard_matching['Price']<=int(ending_price)]
-            else:
-                hard_matching=shoe_catalog[shoe_catalog['Price']<=int(ending_price)]
-        if gender.lower() !='unisex':
-            if hard_matching is not None:
-                hard_matching=hard_matching[hard_matching['Gender'].str.lower()==gender.lower()]
-            else:
-                hard_matching=shoe_catalog[shoe_catalog['Gender'].str.lower()==gender.lower()]
+            shoe_description+=f'Brand: {product_brand}'
         if shoe_color is not None:
-            if hard_matching is not None:
-                hard_matching=hard_matching[hard_matching['PrimaryColor'].str.lower()==shoe_color.lower()]
-            else:
-                hard_matching=shoe_catalog[shoe_catalog['PrimaryColor'].str.lower()==shoe_color.lower()]
-
-        res={"direct_matching":None,"related_matching":None}
+            shoe_description+=f'Color {shoe_color}'
+        semantic_res=client.query_points(
+            collection_name="catalog",
+            query=Document(text=shoe_description,model="sentence-transformers/all-MiniLM-L6-v2"),
+            with_payload=True,
+            limit=10
+        )
+    hard_matching=None
+    if product_name is not None:
+        hard_matching=shoe_catalog[shoe_catalog['ProductName'].str.lower()==product_name.lower()]
+    if product_brand is not None:
+        hard_matching=shoe_catalog[shoe_catalog['ProductBrand'].str.lower()==product_brand.lower()]
+    if int(starting_price) >0:
         if hard_matching is not None:
-            res['direct_matching']=hard_matching.to_json(orient='records')
-        if semantic_res is not None:
-            soft_matching=pd.DataFrame(columns=shoe_catalog.columns)
-            for id in semantic_res.points:
-                if id.score<0.5:
-                    continue
-                item=shoe_catalog[shoe_catalog['ProductID']==id.payload['P_id']]
-                soft_matching=pd.concat([soft_matching,item],ignore_index=True)
-            res['related_matching']=soft_matching.to_json(orient='records')
-
-        return json.dumps(res)
-    except Exception as e:
-        return json.dumps({
-            "error":"Encountered an error "+e
-        })
+            hard_matching=hard_matching[hard_matching['Price']>=int(starting_price)]
+        else:
+            hard_matching=shoe_catalog[shoe_catalog['Price']>=int(starting_price)]
+    if int(ending_price) <19999:
+        if hard_matching is not None:
+            
+            hard_matching=hard_matching[hard_matching['Price']<=int(ending_price)]
+        else:
+            hard_matching=shoe_catalog[shoe_catalog['Price']<=int(ending_price)]
+    if gender.lower() !='unisex':
+        if hard_matching is not None:
+            hard_matching=hard_matching[hard_matching['Gender'].str.lower()==gender.lower()]
+        else:
+            hard_matching=shoe_catalog[shoe_catalog['Gender'].str.lower()==gender.lower()]
+    if shoe_color is not None:
+        if hard_matching is not None:
+            hard_matching=hard_matching[hard_matching['PrimaryColor'].str.lower()==shoe_color.lower()]
+        else:
+            hard_matching=shoe_catalog[shoe_catalog['PrimaryColor'].str.lower()==shoe_color.lower()]
+    res={"direct_matching":None,"related_matching":None}
+    if hard_matching is not None:
+        res['direct_matching']=hard_matching.to_json(orient='records')
+    if semantic_res is not None:
+        soft_matching=pd.DataFrame(columns=shoe_catalog.columns)
+        for id in semantic_res.points:
+            if id.score<0.5:
+                continue
+            item=shoe_catalog[shoe_catalog['ProductID']==id.payload['P_id']]
+            soft_matching=pd.concat([soft_matching,item],ignore_index=True)
+        res['related_matching']=soft_matching.to_json(orient='records')
+    return json.dumps(res)
 
 
 
@@ -216,12 +205,8 @@ def get_cart(token=None):
         return json.dumps(cart_info)
     rec_items=[]
     for ids in recommendations['productID']:
-        if int(ids)<1129:
-            indx=shoe_catalog[shoe_catalog['ProductID']==int(ids)]
-            rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})
-        else:
-            indx=other_items[other_items['ProductID']==int(ids)]
-            rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})
+        indx=shoe_catalog[shoe_catalog['ProductID']==int(ids)]
+        rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})  
     cart_info['People also buy']=rec_items
     return json.dumps(cart_info)
 
@@ -232,7 +217,7 @@ def add_item(token=None, product_name=None,quantity=1):
 
 
     """
-    This tool can be used to add an item to the cart
+    This tool can be used to add an item to the cart and recommends items bought together with this item
 
     params:
 
@@ -282,11 +267,12 @@ def add_item(token=None, product_name=None,quantity=1):
         else:
             cart_connection.replace_one({'user_id':str(user_id)},cart_info)
 
-        return json.dumps({"updated_cart":str(cart_info)})
+        recoms=recommend_items({item['ProductID'].iloc[0].item()},rules)
+        return json.dumps({"updated_cart":str(cart_info),"people also buy":str(recoms)})
         
     except Exception as e:
         return json.dumps({
-            "error":"Encountered an error "+e
+            "error":"Encountered an error "+str(e)
         })
 
 
@@ -330,6 +316,7 @@ def remove_item(token=None, product_name=None,quantity=1):
         if(products.get(product_name,None)) is None:
             return {"error":"User's cart doesnt have the item in the cart"}
         quan=products.get(product_name)['Quantity']
+        
         if(quan<=quantity):
             amt=cart_info['Products'][product_name]['Quantity']
             cart_info['Products'].pop(product_name)
@@ -343,8 +330,10 @@ def remove_item(token=None, product_name=None,quantity=1):
         
     except Exception as e:
         return json.dumps({
-            "error":"Encountered an error "+e
+            "error":"Encountered an error "+str(e)
         })
+
+
 
 @mcp.tool()
 def login(email=None,password=None):
@@ -371,9 +360,6 @@ def login(email=None,password=None):
 
 
 
-
-
-
 @mcp.tool()
 def generate_payment_link(token):
     """
@@ -391,7 +377,7 @@ def generate_payment_link(token):
     cart_info=cart_connection.find_one({"user_id":str(user_id)},{"_id":0})
     amount=cart_info['Amount']
 
-    link="www.pay_url.com/"+user_id
+    link="http://127.0.0.1:8000/cart/"+user_id
 
     return json.dumps({
         "payment_url":link,
@@ -399,13 +385,6 @@ def generate_payment_link(token):
         "amount":amount
     })
 
-
-token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2YTkzMThlNGQ3M2JmMDUzOWEyYjdiZmQiLCJlbWFpbCI6Imx2bEBnLmNvbSIsImV4cCI6MTc4ODEyMzU3MX0.0IsviajkOElvShsjDUWv0ldQfaY5csnDF5ua0Vu8HLA"
-
-#add_item(token,"Air Zoom Structure 2")
-
-
-print(get_cart(token))
 
 if __name__=="__main__":
     mcp.run(transport="stdio")
