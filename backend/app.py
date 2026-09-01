@@ -306,7 +306,6 @@ app=FastAPI()
 @app.get("/cart/{user_id}")
 def return_cart(user_id):
     res=cart_connection.find_one({'user_id':user_id})
-    user=user_connection.find_one({'_id':ObjectId(user_id)})
     if res is None:
         return HTMLResponse("""
             <!DOCTYPE html>
@@ -552,7 +551,7 @@ def return_cart(user_id):
     
     amount_paise = int(round(float(res['Amount']) * 100))
     amount_text = inr(res['Amount'])
-    email = html.escape(str(user['email']))
+    email = "temp@gmail.com"
     
     end_doc = f"""
         <button class="pay" type="button" id="pay" onclick="payNow()">Pay &#8377;{amount_text}</button>
