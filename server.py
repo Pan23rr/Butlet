@@ -34,6 +34,7 @@ client=MongoClient(mongo_uri)
 database=client['database']
 cart_connection=database['carts']
 user_connection=database['users']
+payment_connection=database['payments']
 razorpay_client=razorpay.Client(auth=(razor_api,razor_secret))
 
 shoe_catalog=pd.read_csv("shop-product-catalog.csv")
@@ -344,6 +345,32 @@ def create_server() -> MCPServer:
 
 
 
+
+
+    @mcp.tool()
+    def get_recent_order():
+        """
+        This tool is used to get the most recent order placed by the user along with the cart info
+        """
+
+        token=get_access_token()
+        user_id=token['azp']
+
+        pay_info=payment_connection.find_one({'user_id':user_id})
+        payments_made=list(pay_info)[-1]
+
+        last_payment={}
+        last_payment['order_info']=payments_made['cart']
+        last_payment['order_info'].pop('_id')
+        last_payment['order_info'].pop('user_id')
+        last_payment['user_info']={
+            "user_mail":payments_made['mail'],
+            "number":payments_made['number']
+        }
+
+        return last_payment
+
+        
 
 
 

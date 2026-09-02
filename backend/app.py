@@ -697,6 +697,7 @@ async def payment_success(
     cart_connection.delete_one({"user_id": order_info["user_id"]})
 
     order_info.pop('_id')
+    order_info['cart']=cart_info
 
     payment_connection.insert_one(order_info)
     now = datetime.now()
