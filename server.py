@@ -354,10 +354,11 @@ def create_server() -> MCPServer:
         """
 
         token=get_access_token()
-        user_id=token['azp']
+        user_id=token.claims['azp']
 
-        pay_info=payment_connection.find_one({'user_id':user_id})
+        pay_info=payment_connection.find({'user_id':user_id})
         payments_made=list(pay_info)[-1]
+        print(payments_made)
 
         last_payment={}
         last_payment['order_info']=payments_made['cart']
