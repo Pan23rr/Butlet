@@ -548,10 +548,11 @@ def return_cart(user_id):
         </div>
     """.format(amount=inr(res['Amount']))
     
-    
+    user_info=user_connection.find_one({"user_id":user_id})
     amount_paise = int(round(float(res['Amount']) * 100))
     amount_text = inr(res['Amount'])
-    email = "temp@gmail.com"
+    email = user_info['mail']
+    number=user_info['number']
     
     end_doc = f"""
         <button class="pay" type="button" id="pay" onclick="payNow()">Pay &#8377;{amount_text}</button>
@@ -636,13 +637,29 @@ def return_cart(user_id):
 def create_order(Amt:Amount):
     amt=Amt.amount
     currency='INR'
+    user=Amt.user_id
+    print("USER USER ")
+    order_exist=order_connection.find_one({"user_id":user})
+    if order_exist is not None:
+        order_exist.pop('_id')
+        order_exist.pop('mail')
+        order_exist.pop('number')
+        order_exist.pop('user_id')
+        return order_exist
+    user=user_connection.find_one({"user_id":user},{'_id':0})
+    print(user)
+    #user.pop("_id")
     order_info=razorpay_client.order.create(data={
         "amount":amt,
-        "currency":currency
+        "currency":currency,
     })
     order_info['user_id']=Amt.user_id
-    res=order_connection.insert_one(order_info)
-    order_info.pop("_id")
+    order_info['mail']=user['mail']
+    order_info['number']=user['number']
+    print("ver veru")
+    print(order_info)
+    order_connection.insert_one(order_info)
+    order_info.pop('_id')
     return order_info
 
 
@@ -669,15 +686,26 @@ async def payment_success(
         return {"error":e}
  
     order_info["payment_id"] = razorpay_payment_id
+    order_info['amount_paid']=order_info['amount_due']
+    order_info['amount_due']=0
+    order_info['entity']='payment'
     order_info["paid_at"] = datetime.utcnow()
- 
-    payment_connection.insert_one(order_info)
+
+
+    cart_info=cart_connection.find_one({"user_id":order_info['user_id']})
     order_connection.delete_one({"_id": order_info["_id"]})
     cart_connection.delete_one({"user_id": order_info["user_id"]})
- 
+
+    order_info.pop('_id')
+
+    payment_connection.insert_one(order_info)
     now = datetime.now()
-    items = order_info.get("items", [])
-    item_count = sum(int(i.get("quantity", 1)) for i in items) if items else len(items)
+    items=cart_info['Products']
+    
+    item_count = 0
+
+    for item in items.keys():
+        item_count+=items[item]['Quantity']
  
     return HTMLResponse(render(
         date=now.strftime("%d %b %Y"),

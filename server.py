@@ -28,10 +28,6 @@ load_dotenv()
 razor_api=os.getenv("RAZORPAY_API")
 razor_secret=os.getenv("RAZORPAY_SECRET")
 
-jwt_secret=os.getenv("JWT_SECRET")
-jwt_algorithm=os.getenv("JWT_ALGORITHM")
-
-
 mongo_uri=os.getenv("MONGO_CONNECTION_URL")
 
 client=MongoClient(mongo_uri)
@@ -210,8 +206,10 @@ def create_server() -> MCPServer:
             id=shoe_catalog[shoe_catalog['ProductName']==item]['ProductID'].iloc[0].item()
             items.add(id)
         recommendations=recommend_items(items,rules)
+        
         if recommendations.empty:
             return json.dumps(cart_info)
+
         rec_items=[]
         for ids in recommendations['productID']:
             indx=shoe_catalog[shoe_catalog['ProductID']==int(ids)]
@@ -227,6 +225,7 @@ def create_server() -> MCPServer:
 
         """
         This tool can be used to add an item to the cart and recommends items bought together with this item
+        Unless explicitly states the otherwise , user must be provided with options / recommendations along with the products "people also buy"
 
         params:
 
@@ -275,7 +274,12 @@ def create_server() -> MCPServer:
                 cart_connection.replace_one({'user_id':str(user_id)},cart_info)
 
             recoms=recommend_items({item['ProductID'].iloc[0].item()},rules)
-            return json.dumps({"updated_cart":str(cart_info),"people also buy":str(recoms)})
+            rec_items=[]
+            for ids in recoms['productID']:
+                indx=shoe_catalog[shoe_catalog['ProductID']==int(ids)]
+                rec_items.append({"item":indx['ProductName'].item(),"price":indx['Price'].item()})
+
+            return json.dumps({"updated_cart":str(cart_info),"people also buy":str(rec_items)})
 
         except Exception as e:
             return json.dumps({
@@ -283,12 +287,8 @@ def create_server() -> MCPServer:
             })
 
 
-
-
     @mcp.tool()
     def remove_item(product_name=None,quantity=1):    
-
-
 
         """
         This tool can be used to remove an item to the cart
@@ -322,13 +322,16 @@ def create_server() -> MCPServer:
             if(products.get(product_name,None)) is None:
                 return {"error":"User's cart doesnt have the item in the cart"}
             quan=products.get(product_name)['Quantity']
-
+            item=shoe_catalog[shoe_catalog['ProductName'].str.lower()==product_name.lower()]
             if(quan<=quantity):
                 amt=cart_info['Products'][product_name]['Quantity']
                 cart_info['Products'].pop(product_name)
+                cart_info['Amount']-=quan*item['Price'].iloc[0].item()
                 cart_connection.replace_one({'user_id':str(user_id)},cart_info)
                 return {"updated_cart":cart_info,"note":"quantity to be removed is larger than or equal to the quantity in thhe cart removed the item completely"}
+
             cart_info['Products'][product_name]['Quantity']-=quantity
+            cart_info['Amount']-=quantity*item['Price'].iloc[0].item()
 
             cart_connection.replace_one({'user_id':str(user_id)},cart_info)
 
@@ -346,17 +349,30 @@ def create_server() -> MCPServer:
 
 
     @mcp.tool()
-    def generate_payment_link():
+    def generate_payment_link(mail,number):
         """
         Tool used to generate the final checkout link, other wise proceed with the payment  if the agent is authorized to make the payment via the wallet
 
+        params:
+        mail: Mandatory, User email that should be used for purchase
+        number: Mandatory, Phone number that should be used for purchase
 
         """
+        if mail is None:
+            return {"error":"Mail is required to generate the payment"}
+        if number is None:
+            return {"error":"Number is required to generate the payment"}
+
         token=get_access_token()
         user_id=token.claims['azp']
 
 
         cart_info=cart_connection.find_one({"user_id":str(user_id)},{"_id":0})
+        user_connection.insert_one({
+            "user_id":user_id,
+            "mail":mail,
+            "number":number
+        })
         amount=cart_info['Amount']
 
         link="http://127.0.0.1:8000/cart/"+user_id
@@ -364,7 +380,7 @@ def create_server() -> MCPServer:
         return json.dumps({
             "payment_url":link,
             "cart":cart_info,
-            "amount":amount
+            "amount":amount,
         })
 
     return mcp

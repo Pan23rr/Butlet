@@ -35,7 +35,6 @@ class IntrospectionTokenVerifier(TokenVerifier):
         if not self.introspection_endpoint.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             return None
 
-        print(token)
 
         timeout = httpx2.Timeout(10.0, connect=5.0)
         limits = httpx2.Limits(max_connections=10, max_keepalive_connections=5)
